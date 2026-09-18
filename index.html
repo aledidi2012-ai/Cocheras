@@ -161,7 +161,9 @@
     view: 'client', date: todayISO(), startTime: nextRoundHour(), duration: 1,
     selectedSpotId: null, payMethod: 'efectivo', reservations: [],
     step: 'browse', lastReservation: null, adminDate: todayISO(), adminReservations: [],
-    configError: null, session: null, authChecked: false, loginError: null, loginBusy: false
+    configError: null, session: null, authChecked: false,
+    isAdmin: null, loginError: null, loginBusy: false,
+    clientAuthMode: 'login', clientAuthError: null, clientAuthBusy: false
   };
 
   var sb = null;
@@ -199,14 +201,21 @@
     sb.auth.getSession().then(function(res){
       state.session = res.data.session;
       state.authChecked = true;
-      if (state.session && state.view === 'admin') fetchAdminDate();
-      render();
+      refreshAuthContext();
     });
     sb.auth.onAuthStateChange(function(event, session){
       state.session = session;
-      if (state.session && state.view === 'admin') fetchAdminDate();
-      render();
+      refreshAuthContext();
     });
+  }
+
+  async function refreshAuthContext(){
+    if (!state.session){ state.isAdmin = false; render(); return; }
+    state.isAdmin = null; render();
+    var res = await sb.from('admins').select('user_id').eq('user_id', state.session.user.id).maybeSingle();
+    state.isAdmin = !res.error && !!res.data;
+    render();
+    if (state.isAdmin && state.view === 'admin') fetchAdminDate();
   }
 
   async function handleLogin(email, password){
@@ -219,6 +228,26 @@
 
   async function handleLogout(){
     await sb.auth.signOut();
+  }
+
+  async function handleClientLogin(email, password){
+    state.clientAuthBusy = true; state.clientAuthError = null; render();
+    var res = await sb.auth.signInWithPassword({ email: email, password: password });
+    state.clientAuthBusy = false;
+    if (res.error){ state.clientAuthError = 'No se pudo ingresar: ' + res.error.message; render(); return; }
+  }
+
+  async function handleClientSignup(name, email, password){
+    state.clientAuthBusy = true; state.clientAuthError = null; render();
+    var res = await sb.auth.signUp({ email: email, password: password, options: { data: { name: name } } });
+    state.clientAuthBusy = false;
+    if (res.error){ state.clientAuthError = 'No se pudo crear la cuenta: ' + res.error.message; render(); return; }
+    if (!res.data.session){
+      state.clientAuthError = 'Cuenta creada. Revisá tu email para confirmarla y después iniciá sesión.';
+      render();
+      return;
+    }
+    // sesión creada automáticamente -> onAuthStateChange actualiza el resto
   }
 
   function exportCSV(){
@@ -285,16 +314,18 @@
   // ---------- Actions ----------
   function selectSpot(id){ state.selectedSpotId = id; state.step = 'browse'; render(); }
 
-  async function confirmReservation(name, email){
+  async function confirmReservation(){
     var spot = SPOTS.find(function(s){ return s.id === state.selectedSpotId; });
-    if (!spot || !sb) return;
+    if (!spot || !sb || !state.session) return;
     var price = spot.rate * state.duration;
     var code = genCode();
+    var displayName = (state.session.user.user_metadata && state.session.user.user_metadata.name) || state.session.user.email;
     var payload = {
       spot_id: spot.id, section: spot.section, spot_type: spot.type,
       date: state.date, start_time: state.startTime, duration: state.duration,
       end_time: minToTime(timeToMin(state.startTime) + state.duration*60),
-      client_name: name, client_email: email, pay_method: state.payMethod,
+      client_id: state.session.user.id,
+      client_name: displayName, client_email: state.session.user.email, pay_method: state.payMethod,
       price: price, code: code, status: 'confirmada'
     };
     var res = await sb.from('reservations').insert(payload).select().single();
@@ -350,7 +381,11 @@
   }
 
   function clientHeaderHTML(){
-    return '<h1 class="page-title">Reservá tu cochera</h1><p class="page-sub">Elegí fecha y horario, tocá una cochera libre en el mapa y confirmá. La tarifa se calcula según el tipo de vehículo y la duración.</p>';
+    var logout = state.session ? '<button class="btn ghost small" id="client-logout-btn">Cerrar sesión ('+escapeHtml(state.session.user.email)+')</button>' : '';
+    return '<div class="brand-row" style="margin-bottom:4px;">'+
+        '<div><h1 class="page-title" style="margin-bottom:2px;">Reservá tu cochera</h1><p class="page-sub" style="margin-bottom:0;">Elegí fecha y horario, tocá una cochera libre en el mapa y confirmá.</p></div>'+
+        logout+
+      '</div>';
   }
 
   function durationOptions(){
@@ -359,20 +394,41 @@
     return opts;
   }
 
+  function clientAuthFieldsHTML(){
+    var isSignup = state.clientAuthMode === 'signup';
+    return '<div class="tabs" style="margin-top:14px;margin-bottom:6px;">'+
+        '<button type="button" class="tab '+(!isSignup?'active':'')+'" data-mode="login" style="margin-right:16px;">Iniciar sesión</button>'+
+        '<button type="button" class="tab '+(isSignup?'active':'')+'" data-mode="signup">Crear cuenta</button>'+
+      '</div>'+
+      (state.clientAuthError ? '<div class="banner error" style="margin:8px 0;">'+escapeHtml(state.clientAuthError)+'</div>' : '')+
+      '<form id="client-auth-form">'+
+        (isSignup ? '<div class="field"><label for="cl-name">Nombre</label><input required id="cl-name" type="text" placeholder="Nombre y apellido"></div>' : '')+
+        '<div class="field"><label for="cl-email">Email</label><input required id="cl-email" type="email" placeholder="tu@email.com"></div>'+
+        '<div class="field"><label for="cl-pass">Contraseña</label><input required id="cl-pass" type="password" placeholder="••••••••" minlength="6"></div>'+
+        '<button type="submit" class="btn" '+(state.clientAuthBusy?'disabled':'')+'>'+(state.clientAuthBusy ? (isSignup?'Creando cuenta…':'Ingresando…') : (isSignup?'Crear cuenta':'Ingresar'))+'</button>'+
+      '</form>';
+  }
+
   function panelHTML(){
     var spot = SPOTS.find(function(s){ return s.id === state.selectedSpotId; });
     if (!spot) return '<h2>Elegí una cochera</h2><p class="hint">Tocá cualquier casillero libre del mapa para ver el precio y reservarla.</p>';
     var price = spot.rate * state.duration;
     var typeLabel = spot.type === 'auto' ? 'Auto' : (spot.type === 'camioneta' ? 'Camioneta / SUV' : 'Moto');
     var endTime = minToTime(timeToMin(state.startTime) + state.duration*60);
-    return '<h2>Cochera '+spot.id+'</h2>'+
+    var summary = '<h2>Cochera '+spot.id+'</h2>'+
       '<div class="spot-summary"><div class="big">'+spot.id+'</div><div class="meta">'+typeLabel+'<br>'+fmtDate(state.date)+' · '+state.startTime+'–'+endTime+'</div></div>'+
       '<div class="price-row"><span>Tarifa</span><span class="num">'+fmtMoney(spot.rate)+' / h</span></div>'+
       '<div class="price-row"><span>Duración</span><span class="num">'+state.duration+' h</span></div>'+
-      '<div class="price-row total"><span>Total</span><span class="num">'+fmtMoney(price)+'</span></div>'+
+      '<div class="price-row total"><span>Total</span><span class="num">'+fmtMoney(price)+'</span></div>';
+
+    if (!state.session){
+      return summary + '<p class="hint" style="margin-top:14px;">Iniciá sesión o creá una cuenta para confirmar esta reserva.</p>' + clientAuthFieldsHTML();
+    }
+
+    var displayName = (state.session.user.user_metadata && state.session.user.user_metadata.name) || state.session.user.email;
+    return summary +
+      '<div class="price-row"><span>Reservando a nombre de</span><span>'+escapeHtml(displayName)+'</span></div>'+
       '<form id="booking-form">'+
-        '<div class="field"><label for="c-name">Nombre</label><input required id="c-name" type="text" placeholder="Nombre y apellido"></div>'+
-        '<div class="field"><label for="c-email">Email</label><input required id="c-email" type="email" placeholder="tu@email.com"></div>'+
         '<div class="field"><label>Medio de pago</label><div class="payopt">'+
           '<button type="button" class="pm '+(state.payMethod==='efectivo'?'active':'')+'" data-pm="efectivo">Efectivo en el local</button>'+
           '<button type="button" class="pm '+(state.payMethod==='mercadopago'?'active':'')+'" data-pm="mercadopago">Mercado Pago</button>'+
@@ -419,6 +475,17 @@
     if (!state.session){
       return adminLoginHTML();
     }
+    if (state.isAdmin === null){
+      return '<h1 class="page-title">Panel del local</h1><p class="page-sub">Verificando permisos…</p>';
+    }
+    if (!state.isAdmin){
+      return '<h1 class="page-title">Panel del local</h1>'+
+        '<div class="layout" style="grid-template-columns:1fr;max-width:420px;"><div class="panel">'+
+          '<h2>Sin acceso</h2>'+
+          '<p class="hint">La cuenta '+escapeHtml(state.session.user.email)+' no tiene permisos de administrador de este local.</p>'+
+          '<button class="btn ghost" id="logout-btn" style="margin-top:14px;">Cerrar sesión</button>'+
+        '</div></div>';
+    }
     var list = state.adminReservations || [];
     var confirmadas = list.filter(function(r){ return r.status === 'confirmada'; });
     var occupied = confirmadas.length;
@@ -458,6 +525,8 @@
       if (state.step === 'confirmed'){
         var nb = document.getElementById('new-booking');
         if (nb) nb.addEventListener('click', newBooking);
+        var clLogout1 = document.getElementById('client-logout-btn');
+        if (clLogout1) clLogout1.addEventListener('click', handleLogout);
         return;
       }
       var dateEl = document.getElementById('f-date');
@@ -470,16 +539,38 @@
       document.querySelectorAll('.pm').forEach(function(btn){ btn.addEventListener('click', function(){ state.payMethod = btn.dataset.pm; render(); }); });
       var clearBtn = document.getElementById('clear-sel');
       if (clearBtn) clearBtn.addEventListener('click', function(){ state.selectedSpotId=null; render(); });
+
+      // Formulario de reserva (solo existe si hay sesión y una cochera elegida)
       var form = document.getElementById('booking-form');
       if (form) form.addEventListener('submit', function(ev){
         ev.preventDefault();
-        var name = document.getElementById('c-name').value.trim();
-        var email = document.getElementById('c-email').value.trim();
-        if (!name || !email) return;
         var btn = form.querySelector('button[type="submit"]');
         btn.disabled = true; btn.textContent = 'Confirmando…';
-        confirmReservation(name, email);
+        confirmReservation();
       });
+
+      // Login / registro dentro del panel (solo existe si no hay sesión y se eligió cochera)
+      document.querySelectorAll('#app [data-mode]').forEach(function(btn){
+        btn.addEventListener('click', function(){ state.clientAuthMode = btn.dataset.mode; state.clientAuthError = null; render(); });
+      });
+      var authForm = document.getElementById('client-auth-form');
+      if (authForm) authForm.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var email = document.getElementById('cl-email').value.trim();
+        var pass = document.getElementById('cl-pass').value;
+        if (state.clientAuthMode === 'signup'){
+          var nameEl = document.getElementById('cl-name');
+          var name = nameEl ? nameEl.value.trim() : '';
+          if (!name || !email || !pass) return;
+          handleClientSignup(name, email, pass);
+        } else {
+          if (!email || !pass) return;
+          handleClientLogin(email, pass);
+        }
+      });
+
+      var clLogout2 = document.getElementById('client-logout-btn');
+      if (clLogout2) clLogout2.addEventListener('click', handleLogout);
     } else {
       if (!state.session){
         var loginForm = document.getElementById('login-form');
@@ -492,11 +583,12 @@
         });
         return;
       }
+      var logoutBtn = document.getElementById('logout-btn');
+      if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+      if (!state.isAdmin) return;
       var adateEl = document.getElementById('a-date');
       if (adateEl) adateEl.addEventListener('change', function(){ state.adminDate = adateEl.value; fetchAdminDate(); });
       document.querySelectorAll('[data-cancel]').forEach(function(btn){ btn.addEventListener('click', function(){ cancelReservation(btn.dataset.cancel); }); });
-      var logoutBtn = document.getElementById('logout-btn');
-      if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
       var exportBtn = document.getElementById('export-csv');
       if (exportBtn) exportBtn.addEventListener('click', exportCSV);
     }
@@ -505,7 +597,7 @@
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
       state.view = t.dataset.view;
-      if (state.view === 'admin' && state.session) fetchAdminDate();
+      if (state.view === 'admin' && state.isAdmin) fetchAdminDate();
       render();
     });
   });
