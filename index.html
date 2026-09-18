@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Andén 12 — Reservá tu cochera</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="./config.js"></script>
+<style>
+  :root{
+    --bg:#17181B; --panel:#1F2124; --panel-2:#26292E; --raised:#2C2F35;
+    --border:#383B42; --text:#F2F0E9; --text-dim:#9A9DA5; --text-faint:#6C6F77;
+    --accent:#F5B400; --accent-ink:#221A00;
+    --ok:#4FA372; --ok-bg:#1C2A22; --busy:#D6584C; --busy-bg:#2C1F1E;
+    --radius:10px; --shadow: 0 12px 28px rgba(0,0,0,0.35);
+  }
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{ background:var(--bg); color:var(--text); font-family:'Inter', system-ui, sans-serif; min-height:100vh; -webkit-font-smoothing:antialiased; }
+  ::selection{ background:var(--accent); color:var(--accent-ink); }
+  .num, .display{ font-family:'Oswald', system-ui, sans-serif; }
+  a{ color:inherit; }
+  button{ font-family:inherit; cursor:pointer; }
+  input, select{ font-family:inherit; }
+  .wrap{ max-width:1180px; margin:0 auto; padding:0 20px 80px; }
+
+  header.site{ border-bottom:1px solid var(--border); background:linear-gradient(180deg, rgba(245,180,0,0.05), transparent 60%), var(--panel); padding:22px 0 0; }
+  .header-inner{ max-width:1180px; margin:0 auto; padding:0 20px; }
+  .brand-row{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  .brand{ display:flex; align-items:center; gap:12px; }
+  .brand-mark{ width:44px; height:44px; border-radius:8px; background:var(--accent); color:var(--accent-ink); display:flex; align-items:center; justify-content:center; font-family:'Oswald'; font-weight:700; font-size:22px; flex:none; }
+  .brand-name{ font-family:'Oswald'; font-weight:600; font-size:22px; letter-spacing:0.3px; }
+  .brand-sub{ color:var(--text-dim); font-size:13px; margin-top:1px; }
+  .tabs{ display:flex; gap:4px; margin-top:22px; }
+  .tab{ background:none; border:none; color:var(--text-dim); padding:12px 4px; font-size:14.5px; font-weight:500; border-bottom:2px solid transparent; margin-right:24px; transition:color .15s; }
+  .tab.active{ color:var(--text); border-bottom-color:var(--accent); }
+  .tab:hover{ color:var(--text); }
+  main{ padding-top:28px; }
+  h1.page-title{ font-family:'Oswald'; font-weight:500; font-size:26px; margin:0 0 4px; }
+  .page-sub{ color:var(--text-dim); font-size:14.5px; margin:0 0 22px; max-width:60ch; }
+
+  .controls{ display:flex; gap:14px; flex-wrap:wrap; align-items:flex-end; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px 18px; margin-bottom:26px; }
+  .field{ display:flex; flex-direction:column; gap:6px; }
+  .field label{ font-size:12px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.06em; }
+  .field input, .field select{ background:var(--raised); border:1px solid var(--border); color:var(--text); border-radius:7px; padding:9px 10px; font-size:14.5px; min-width:130px; }
+  .field input:focus, .field select:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  .controls .legend{ margin-left:auto; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  .legend-item{ display:flex; align-items:center; gap:7px; font-size:13px; color:var(--text-dim); }
+  .dot{ width:10px; height:10px; border-radius:3px; }
+  .dot.ok{ background:var(--ok); } .dot.busy{ background:var(--busy); } .dot.sel{ background:var(--accent); }
+
+  .layout{ display:grid; grid-template-columns:1fr 340px; gap:24px; align-items:start; }
+  @media (max-width:880px){ .layout{ grid-template-columns:1fr; } }
+  .lot{ display:flex; flex-direction:column; gap:20px; }
+  .section-block{ border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; background:var(--panel); }
+  .section-head{ display:flex; align-items:baseline; justify-content:space-between; padding:12px 16px; border-bottom:1px solid var(--border); background:var(--panel-2); }
+  .section-head .name{ font-family:'Oswald'; font-size:14px; letter-spacing:0.04em; }
+  .section-head .rate{ font-size:12.5px; color:var(--text-dim); }
+  .spot-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(56px,1fr)); gap:9px; padding:16px; }
+  .spot{ aspect-ratio:1/1; border-radius:7px; border:1px solid var(--border); background:var(--raised); display:flex; align-items:center; justify-content:center; font-family:'Oswald'; font-size:17px; color:var(--text); position:relative; transition:transform .1s, border-color .15s; }
+  .spot.ok{ background:var(--ok-bg); border-color:rgba(79,163,114,0.4); }
+  .spot.busy{ background:var(--busy-bg); border-color:rgba(214,88,76,0.35); color:var(--text-faint); cursor:not-allowed; }
+  .spot.sel{ border-color:var(--accent); box-shadow:0 0 0 2px var(--accent) inset; color:var(--accent); }
+  .spot.ok:hover{ transform:translateY(-2px); border-color:var(--accent); }
+  .spot:disabled{ pointer-events:none; }
+
+  .panel{ position:sticky; top:20px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:20px; min-height:120px; }
+  .panel h2{ font-family:'Oswald'; font-weight:500; font-size:18px; margin:0 0 4px; }
+  .panel .hint{ color:var(--text-dim); font-size:13.5px; line-height:1.5; }
+  .panel .spot-summary{ display:flex; align-items:center; gap:12px; padding:12px; margin:14px 0; background:var(--panel-2); border-radius:8px; border:1px solid var(--border); }
+  .spot-summary .big{ font-family:'Oswald'; font-size:26px; color:var(--accent); }
+  .spot-summary .meta{ font-size:13px; color:var(--text-dim); }
+  .price-row{ display:flex; justify-content:space-between; font-size:14px; padding:6px 0; color:var(--text-dim); }
+  .price-row.total{ color:var(--text); font-weight:600; border-top:1px solid var(--border); margin-top:6px; padding-top:12px; font-size:16px; }
+  .price-row.total .num{ color:var(--accent); }
+  .panel form{ display:flex; flex-direction:column; gap:12px; margin-top:14px; }
+  .payopt{ display:flex; gap:8px; }
+  .payopt button{ flex:1; padding:9px 8px; border-radius:7px; border:1px solid var(--border); background:var(--raised); color:var(--text-dim); font-size:13px; }
+  .payopt button.active{ border-color:var(--accent); color:var(--accent); background:rgba(245,180,0,0.08); }
+  .btn{ border:none; border-radius:8px; padding:12px 16px; font-weight:600; font-size:14.5px; background:var(--accent); color:var(--accent-ink); width:100%; }
+  .btn:disabled{ opacity:0.5; cursor:not-allowed; }
+  .btn.ghost{ background:none; border:1px solid var(--border); color:var(--text-dim); font-weight:500; }
+  .btn.small{ width:auto; padding:8px 12px; font-size:13px; }
+
+  .ticket{ text-align:center; }
+  .ticket .check{ width:52px; height:52px; border-radius:50%; background:var(--ok-bg); color:var(--ok); display:flex; align-items:center; justify-content:center; font-size:24px; margin:4px auto 14px; }
+  .ticket .code{ font-family:'Oswald'; font-size:15px; color:var(--text-dim); letter-spacing:0.06em; }
+  .ticket dl{ text-align:left; margin:16px 0; border-top:1px dashed var(--border); padding-top:14px; }
+  .ticket dl div{ display:flex; justify-content:space-between; font-size:13.5px; padding:5px 0; }
+  .ticket dl dt{ color:var(--text-dim); }
+
+  .stat-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-bottom:24px; }
+  @media (max-width:700px){ .stat-row{ grid-template-columns:repeat(2,1fr); } }
+  .stat{ background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:16px; }
+  .stat .val{ font-family:'Oswald'; font-size:28px; }
+  .stat .lbl{ color:var(--text-dim); font-size:12.5px; margin-top:2px; }
+
+  table.res{ width:100%; border-collapse:collapse; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); overflow:hidden; }
+  table.res thead th{ text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:0.05em; color:var(--text-dim); padding:10px 14px; border-bottom:1px solid var(--border); background:var(--panel-2); font-weight:500; }
+  table.res tbody td{ padding:12px 14px; border-bottom:1px solid var(--border); font-size:14px; }
+  table.res tbody tr:last-child td{ border-bottom:none; }
+  .badge{ display:inline-block; padding:3px 9px; border-radius:20px; font-size:12px; font-weight:500; }
+  .badge.ok{ background:var(--ok-bg); color:var(--ok); }
+  .table-wrap{ overflow-x:auto; border-radius:var(--radius); }
+  .empty{ padding:50px 20px; text-align:center; color:var(--text-dim); border:1px solid var(--border); border-radius:var(--radius); background:var(--panel); }
+  .empty .big{ font-family:'Oswald'; font-size:20px; color:var(--text); margin-bottom:6px; }
+
+  .banner{ background:rgba(245,180,0,0.08); border:1px solid rgba(245,180,0,0.3); color:var(--accent); border-radius:8px; padding:10px 14px; font-size:13px; margin-bottom:20px; }
+  .banner.error{ background:rgba(214,88,76,0.1); border-color:rgba(214,88,76,0.4); color:var(--busy); }
+  @media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="header-inner">
+    <div class="brand-row">
+      <div class="brand">
+        <div class="brand-mark">P</div>
+        <div>
+          <div class="brand-name">Andén 12</div>
+          <div class="brand-sub">Estacionamiento por hora</div>
+        </div>
+      </div>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-view="client">Reservar</button>
+      <button class="tab" data-view="admin">Panel del local</button>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="banner-slot"></div>
+  <div id="app"></div>
+</main>
+
+<script>
+(function(){
+  "use strict";
+
+  var SECTIONS = [
+    { id:'A', name:'Sección A · Autos', type:'auto', rate:1500, count:10 },
+    { id:'B', name:'Sección B · Camionetas / SUV', type:'camioneta', rate:2000, count:6 },
+    { id:'C', name:'Sección C · Motos', type:'moto', rate:800, count:8 }
+  ];
+  function allSpots(){
+    var out = [];
+    SECTIONS.forEach(function(s){
+      for (var i=1;i<=s.count;i++) out.push({ id:s.id+i, section:s.id, sectionName:s.name, type:s.type, rate:s.rate, num:i });
+    });
+    return out;
+  }
+  var SPOTS = allSpots();
+  var TOTAL_SPOTS = SPOTS.length;
+
+  var state = {
+    view: 'client', date: todayISO(), startTime: nextRoundHour(), duration: 1,
+    selectedSpotId: null, payMethod: 'efectivo', reservations: [],
+    step: 'browse', lastReservation: null, adminDate: todayISO(), adminReservations: [],
+    configError: null
+  };
+
+  var sb = null;
+  var realtimeChannel = null;
+
+  function todayISO(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
+  function pad(n){ return n<10?'0'+n:''+n; }
+  function nextRoundHour(){ var d=new Date(); var h=d.getHours()+1; if (h>21) h=9; return pad(h)+':00'; }
+  function timeToMin(t){ var p=t.split(':'); return (+p[0])*60+(+p[1]); }
+  function minToTime(m){ m=((m%1440)+1440)%1440; return pad(Math.floor(m/60))+':'+pad(m%60); }
+  function fmtMoney(n){ return '$' + Number(n).toLocaleString('es-AR'); }
+  function fmtDate(iso){ var d=new Date(iso+'T00:00:00'); return d.toLocaleDateString('es-AR', { weekday:'short', day:'2-digit', month:'short' }); }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function genCode(){ return 'AN-' + Math.random().toString(36).slice(2,7).toUpperCase(); }
+
+  // ---------- Supabase bootstrap ----------
+  function initSupabase(){
+    var url = window.SUPABASE_URL, key = window.SUPABASE_ANON_KEY;
+    if (!url || !key || url.indexOf('TU-PROYECTO') !== -1 || key.indexOf('TU-CLAVE') !== -1){
+      state.configError = 'Faltan completar SUPABASE_URL y SUPABASE_ANON_KEY en config.js';
+      renderBanner(); render();
+      return;
+    }
+    try{
+      sb = window.supabase.createClient(url, key);
+    }catch(e){
+      state.configError = 'No se pudo conectar con Supabase: ' + e.message;
+      renderBanner(); render();
+      return;
+    }
+    renderBanner();
+    fetchClientDate();
+    subscribeRealtime();
+  }
+
+  function renderBanner(){
+    var slot = document.getElementById('banner-slot');
+    if (state.configError){
+      slot.innerHTML = '<div class="banner error">' + escapeHtml(state.configError) + '</div>';
+    } else {
+      slot.innerHTML = '';
+    }
+  }
+
+  async function fetchClientDate(){
+    if (!sb) return;
+    var res = await sb.from('reservations').select('*').eq('date', state.date).eq('status','confirmada');
+    if (!res.error) { state.reservations = res.data || []; render(); }
+  }
+
+  async function fetchAdminDate(){
+    if (!sb) return;
+    var res = await sb.from('reservations').select('*').eq('date', state.adminDate).order('start_time', { ascending:true });
+    if (!res.error) { state.adminReservations = res.data || []; render(); }
+  }
+
+  function subscribeRealtime(){
+    if (!sb) return;
+    if (realtimeChannel) sb.removeChannel(realtimeChannel);
+    realtimeChannel = sb.channel('reservations-live')
+      .on('postgres_changes', { event:'*', schema:'public', table:'reservations' }, function(){
+        fetchClientDate();
+        if (state.view === 'admin') fetchAdminDate();
+      })
+      .subscribe();
+  }
+
+  // ---------- Availability ----------
+  function isSpotFree(spotId, date, startTime, duration){
+    var s = timeToMin(startTime), e = s + duration*60;
+    var list = (date === state.date) ? state.reservations : [];
+    for (var i=0;i<list.length;i++){
+      var r = list[i];
+      if (r.spot_id !== spotId || r.status !== 'confirmada') continue;
+      var rs = timeToMin(r.start_time), re = rs + r.duration*60;
+      if (s < re && rs < e) return false;
+    }
+    return true;
+  }
+
+  // ---------- Actions ----------
+  function selectSpot(id){ state.selectedSpotId = id; state.step = 'browse'; render(); }
+
+  async function confirmReservation(name, email){
+    var spot = SPOTS.find(function(s){ return s.id === state.selectedSpotId; });
+    if (!spot || !sb) return;
+    var price = spot.rate * state.duration;
+    var code = genCode();
+    var payload = {
+      spot_id: spot.id, section: spot.section, spot_type: spot.type,
+      date: state.date, start_time: state.startTime, duration: state.duration,
+      end_time: minToTime(timeToMin(state.startTime) + state.duration*60),
+      client_name: name, client_email: email, pay_method: state.payMethod,
+      price: price, code: code, status: 'confirmada'
+    };
+    var res = await sb.from('reservations').insert(payload).select().single();
+    if (res.error){
+      alert('No se pudo confirmar la reserva: ' + res.error.message);
+      var btn = document.querySelector('#booking-form button[type="submit"]');
+      if (btn){ btn.disabled=false; btn.textContent = 'Confirmar reserva · '+fmtMoney(price); }
+      return;
+    }
+    state.lastReservation = res.data;
+    state.step = 'confirmed';
+    state.selectedSpotId = null;
+    render();
+  }
+
+  async function cancelReservation(id){
+    if (!confirm('¿Cancelar esta reserva?') || !sb) return;
+    var res = await sb.from('reservations').delete().eq('id', id);
+    if (res.error) alert('No se pudo cancelar: ' + res.error.message);
+  }
+
+  function newBooking(){ state.step = 'browse'; state.lastReservation = null; render(); }
+
+  // ---------- Render ----------
+  function render(){
+    document.querySelectorAll('.tab').forEach(function(t){ t.classList.toggle('active', t.dataset.view === state.view); });
+    var app = document.getElementById('app');
+    app.innerHTML = state.view === 'client' ? clientHTML() : adminHTML();
+    bindClientOrAdmin();
+  }
+
+  function clientHTML(){
+    if (state.step === 'confirmed' && state.lastReservation) return clientHeaderHTML() + confirmedHTML();
+    var sectionsHTML = SECTIONS.map(function(sec){
+      var spots = SPOTS.filter(function(s){ return s.section === sec.id; });
+      var tiles = spots.map(function(s){
+        var free = isSpotFree(s.id, state.date, state.startTime, state.duration);
+        var sel = s.id === state.selectedSpotId;
+        var cls = sel ? 'sel' : (free ? 'ok' : 'busy');
+        return '<button class="spot '+cls+'" data-spot="'+s.id+'" '+(free?'':'disabled')+' aria-label="Cochera '+s.id+(free?' disponible':' ocupada')+'">'+s.num+'</button>';
+      }).join('');
+      return '<div class="section-block"><div class="section-head"><span class="name">'+sec.name+'</span><span class="rate">'+fmtMoney(sec.rate)+' / hora</span></div><div class="spot-grid">'+tiles+'</div></div>';
+    }).join('');
+
+    return clientHeaderHTML() +
+      '<div class="controls">'+
+        '<div class="field"><label for="f-date">Fecha</label><input type="date" id="f-date" value="'+state.date+'"></div>'+
+        '<div class="field"><label for="f-time">Hora de entrada</label><input type="time" id="f-time" value="'+state.startTime+'"></div>'+
+        '<div class="field"><label for="f-dur">Duración</label><select id="f-dur">'+durationOptions()+'</select></div>'+
+        '<div class="legend"><span class="legend-item"><span class="dot ok"></span>Libre</span><span class="legend-item"><span class="dot busy"></span>Ocupada</span><span class="legend-item"><span class="dot sel"></span>Seleccionada</span></div>'+
+      '</div>'+
+      '<div class="layout"><div class="lot">'+sectionsHTML+'</div><div class="panel">'+panelHTML()+'</div></div>';
+  }
+
+  function clientHeaderHTML(){
+    return '<h1 class="page-title">Reservá tu cochera</h1><p class="page-sub">Elegí fecha y horario, tocá una cochera libre en el mapa y confirmá. La tarifa se calcula según el tipo de vehículo y la duración.</p>';
+  }
+
+  function durationOptions(){
+    var opts = '';
+    for (var h=1; h<=12; h++) opts += '<option value="'+h+'" '+(h===state.duration?'selected':'')+'>'+h+' hora'+(h>1?'s':'')+'</option>';
+    return opts;
+  }
+
+  function panelHTML(){
+    var spot = SPOTS.find(function(s){ return s.id === state.selectedSpotId; });
+    if (!spot) return '<h2>Elegí una cochera</h2><p class="hint">Tocá cualquier casillero libre del mapa para ver el precio y reservarla.</p>';
+    var price = spot.rate * state.duration;
+    var typeLabel = spot.type === 'auto' ? 'Auto' : (spot.type === 'camioneta' ? 'Camioneta / SUV' : 'Moto');
+    var endTime = minToTime(timeToMin(state.startTime) + state.duration*60);
+    return '<h2>Cochera '+spot.id+'</h2>'+
+      '<div class="spot-summary"><div class="big">'+spot.id+'</div><div class="meta">'+typeLabel+'<br>'+fmtDate(state.date)+' · '+state.startTime+'–'+endTime+'</div></div>'+
+      '<div class="price-row"><span>Tarifa</span><span class="num">'+fmtMoney(spot.rate)+' / h</span></div>'+
+      '<div class="price-row"><span>Duración</span><span class="num">'+state.duration+' h</span></div>'+
+      '<div class="price-row total"><span>Total</span><span class="num">'+fmtMoney(price)+'</span></div>'+
+      '<form id="booking-form">'+
+        '<div class="field"><label for="c-name">Nombre</label><input required id="c-name" type="text" placeholder="Nombre y apellido"></div>'+
+        '<div class="field"><label for="c-email">Email</label><input required id="c-email" type="email" placeholder="tu@email.com"></div>'+
+        '<div class="field"><label>Medio de pago</label><div class="payopt">'+
+          '<button type="button" class="pm '+(state.payMethod==='efectivo'?'active':'')+'" data-pm="efectivo">Efectivo en el local</button>'+
+          '<button type="button" class="pm '+(state.payMethod==='mercadopago'?'active':'')+'" data-pm="mercadopago">Mercado Pago</button>'+
+        '</div></div>'+
+        '<button type="submit" class="btn">Confirmar reserva · '+fmtMoney(price)+'</button>'+
+        '<button type="button" class="btn ghost" id="clear-sel">Elegir otra cochera</button>'+
+      '</form>';
+  }
+
+  function confirmedHTML(){
+    var r = state.lastReservation;
+    var typeLabel = r.spot_type === 'auto' ? 'Auto' : (r.spot_type === 'camioneta' ? 'Camioneta / SUV' : 'Moto');
+    return '<div class="layout" style="grid-template-columns:1fr;max-width:420px;margin:0 auto;"><div class="panel ticket">'+
+      '<div class="check">✓</div><h2>Reserva confirmada</h2><div class="code">'+r.code+'</div>'+
+      '<dl>'+
+        '<div><dt>Cochera</dt><dd>'+r.spot_id+' · '+typeLabel+'</dd></div>'+
+        '<div><dt>Fecha</dt><dd>'+fmtDate(r.date)+'</dd></div>'+
+        '<div><dt>Horario</dt><dd>'+r.start_time+' – '+r.end_time+'</dd></div>'+
+        '<div><dt>Titular</dt><dd>'+escapeHtml(r.client_name)+'</dd></div>'+
+        '<div><dt>Pago</dt><dd>'+(r.pay_method==='efectivo'?'Efectivo en el local':'Mercado Pago')+'</dd></div>'+
+        '<div><dt>Total</dt><dd>'+fmtMoney(r.price)+'</dd></div>'+
+      '</dl>'+
+      '<button class="btn" id="new-booking">Hacer otra reserva</button>'+
+    '</div></div>';
+  }
+
+  function adminHTML(){
+    var list = state.adminReservations || [];
+    var confirmadas = list.filter(function(r){ return r.status === 'confirmada'; });
+    var occupied = confirmadas.length;
+    var revenue = confirmadas.reduce(function(sum,r){ return sum + (Number(r.price)||0); }, 0);
+    var pct = TOTAL_SPOTS ? Math.round((occupied/TOTAL_SPOTS)*100) : 0;
+
+    var rows = confirmadas.map(function(r){
+      var typeLabel = r.spot_type === 'auto' ? 'Auto' : (r.spot_type === 'camioneta' ? 'Camioneta' : 'Moto');
+      return '<tr><td class="num">'+r.spot_id+'</td><td>'+typeLabel+'</td><td>'+escapeHtml(r.client_name||'—')+'</td>'+
+        '<td>'+r.start_time+'–'+r.end_time+'</td><td>'+fmtMoney(r.price||0)+'</td>'+
+        '<td><span class="badge ok">Confirmada</span></td>'+
+        '<td><button class="btn ghost small" data-cancel="'+r.id+'">Cancelar</button></td></tr>';
+    }).join('');
+
+    var tableOrEmpty = confirmadas.length ?
+      '<div class="table-wrap"><table class="res"><thead><tr><th>Cochera</th><th>Tipo</th><th>Cliente</th><th>Horario</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' :
+      '<div class="empty"><div class="big">Sin reservas para esta fecha</div>Elegí otra fecha o esperá nuevas reservas.</div>';
+
+    return '<h1 class="page-title">Panel del local</h1><p class="page-sub">Reservas por fecha, ocupación e ingresos estimados.</p>'+
+      '<div class="controls"><div class="field"><label for="a-date">Fecha</label><input type="date" id="a-date" value="'+state.adminDate+'"></div></div>'+
+      '<div class="stat-row">'+
+        '<div class="stat"><div class="val num">'+occupied+'</div><div class="lbl">Reservas del día</div></div>'+
+        '<div class="stat"><div class="val num">'+pct+'%</div><div class="lbl">Ocupación (de '+TOTAL_SPOTS+' cocheras)</div></div>'+
+        '<div class="stat"><div class="val num">'+fmtMoney(revenue)+'</div><div class="lbl">Ingresos estimados</div></div>'+
+        '<div class="stat"><div class="val num">'+TOTAL_SPOTS+'</div><div class="lbl">Cocheras totales</div></div>'+
+      '</div>'+ tableOrEmpty;
+  }
+
+  function bindClientOrAdmin(){
+    if (state.view === 'client'){
+      if (state.step === 'confirmed'){
+        var nb = document.getElementById('new-booking');
+        if (nb) nb.addEventListener('click', newBooking);
+        return;
+      }
+      var dateEl = document.getElementById('f-date');
+      var timeEl = document.getElementById('f-time');
+      var durEl = document.getElementById('f-dur');
+      if (dateEl) dateEl.addEventListener('change', function(){ state.date = dateEl.value; state.selectedSpotId=null; fetchClientDate(); });
+      if (timeEl) timeEl.addEventListener('change', function(){ state.startTime = timeEl.value; render(); });
+      if (durEl) durEl.addEventListener('change', function(){ state.duration = +durEl.value; render(); });
+      document.querySelectorAll('.spot.ok, .spot.sel').forEach(function(btn){ btn.addEventListener('click', function(){ selectSpot(btn.dataset.spot); }); });
+      document.querySelectorAll('.pm').forEach(function(btn){ btn.addEventListener('click', function(){ state.payMethod = btn.dataset.pm; render(); }); });
+      var clearBtn = document.getElementById('clear-sel');
+      if (clearBtn) clearBtn.addEventListener('click', function(){ state.selectedSpotId=null; render(); });
+      var form = document.getElementById('booking-form');
+      if (form) form.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var name = document.getElementById('c-name').value.trim();
+        var email = document.getElementById('c-email').value.trim();
+        if (!name || !email) return;
+        var btn = form.querySelector('button[type="submit"]');
+        btn.disabled = true; btn.textContent = 'Confirmando…';
+        confirmReservation(name, email);
+      });
+    } else {
+      var adateEl = document.getElementById('a-date');
+      if (adateEl) adateEl.addEventListener('change', function(){ state.adminDate = adateEl.value; fetchAdminDate(); });
+      document.querySelectorAll('[data-cancel]').forEach(function(btn){ btn.addEventListener('click', function(){ cancelReservation(btn.dataset.cancel); }); });
+    }
+  }
+
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.addEventListener('click', function(){
+      state.view = t.dataset.view;
+      if (state.view === 'admin') fetchAdminDate();
+      render();
+    });
+  });
+
+  render();
+  initSupabase();
+})();
+</script>
+</body>
+</html>
