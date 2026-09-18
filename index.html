@@ -161,7 +161,7 @@
     view: 'client', date: todayISO(), startTime: nextRoundHour(), duration: 1,
     selectedSpotId: null, payMethod: 'efectivo', reservations: [],
     step: 'browse', lastReservation: null, adminDate: todayISO(), adminReservations: [],
-    configError: null
+    configError: null, session: null, authChecked: false, loginError: null, loginBusy: false
   };
 
   var sb = null;
@@ -195,6 +195,46 @@
     renderBanner();
     fetchClientDate();
     subscribeRealtime();
+
+    sb.auth.getSession().then(function(res){
+      state.session = res.data.session;
+      state.authChecked = true;
+      if (state.session && state.view === 'admin') fetchAdminDate();
+      render();
+    });
+    sb.auth.onAuthStateChange(function(event, session){
+      state.session = session;
+      if (state.session && state.view === 'admin') fetchAdminDate();
+      render();
+    });
+  }
+
+  async function handleLogin(email, password){
+    state.loginBusy = true; state.loginError = null; render();
+    var res = await sb.auth.signInWithPassword({ email: email, password: password });
+    state.loginBusy = false;
+    if (res.error){ state.loginError = 'No se pudo ingresar: ' + res.error.message; render(); return; }
+    // onAuthStateChange se encarga de actualizar state.session y refrescar
+  }
+
+  async function handleLogout(){
+    await sb.auth.signOut();
+  }
+
+  function exportCSV(){
+    var list = (state.adminReservations||[]).filter(function(r){ return r.status === 'confirmada'; });
+    var header = ['cochera','tipo','cliente','email','fecha','inicio','fin','precio','pago','codigo'];
+    var lines = [header.join(',')];
+    list.forEach(function(r){
+      var row = [r.spot_id, r.spot_type, r.client_name, r.client_email, r.date, r.start_time, r.end_time, r.price, r.pay_method, r.code];
+      lines.push(row.map(function(v){ return '"'+String(v==null?'':v).replace(/"/g,'""')+'"'; }).join(','));
+    });
+    var blob = new Blob([lines.join('\n')], { type:'text/csv;charset=utf-8;' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'reservas-'+state.adminDate+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   function renderBanner(){
@@ -359,7 +399,26 @@
     '</div></div>';
   }
 
+  function adminLoginHTML(){
+    return '<h1 class="page-title">Panel del local</h1>'+
+      '<p class="page-sub">Ingresá con tu cuenta de administrador para ver y gestionar las reservas.</p>'+
+      '<div class="layout" style="grid-template-columns:1fr;max-width:380px;">'+
+        '<div class="panel">'+
+          '<h2>Iniciar sesión</h2>'+
+          (state.loginError ? '<div class="banner error" style="margin:10px 0;">'+escapeHtml(state.loginError)+'</div>' : '')+
+          '<form id="login-form">'+
+            '<div class="field"><label for="a-email">Email</label><input required id="a-email" type="email" placeholder="admin@tuestacionamiento.com"></div>'+
+            '<div class="field"><label for="a-pass">Contraseña</label><input required id="a-pass" type="password" placeholder="••••••••"></div>'+
+            '<button type="submit" class="btn" '+(state.loginBusy?'disabled':'')+'>'+(state.loginBusy?'Ingresando…':'Ingresar')+'</button>'+
+          '</form>'+
+        '</div>'+
+      '</div>';
+  }
+
   function adminHTML(){
+    if (!state.session){
+      return adminLoginHTML();
+    }
     var list = state.adminReservations || [];
     var confirmadas = list.filter(function(r){ return r.status === 'confirmada'; });
     var occupied = confirmadas.length;
@@ -378,8 +437,14 @@
       '<div class="table-wrap"><table class="res"><thead><tr><th>Cochera</th><th>Tipo</th><th>Cliente</th><th>Horario</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' :
       '<div class="empty"><div class="big">Sin reservas para esta fecha</div>Elegí otra fecha o esperá nuevas reservas.</div>';
 
-    return '<h1 class="page-title">Panel del local</h1><p class="page-sub">Reservas por fecha, ocupación e ingresos estimados.</p>'+
-      '<div class="controls"><div class="field"><label for="a-date">Fecha</label><input type="date" id="a-date" value="'+state.adminDate+'"></div></div>'+
+    return '<div class="brand-row" style="margin-bottom:4px;">'+
+        '<div><h1 class="page-title" style="margin-bottom:2px;">Panel del local</h1><p class="page-sub" style="margin-bottom:0;">Reservas por fecha, ocupación e ingresos estimados.</p></div>'+
+        '<button class="btn ghost small" id="logout-btn">Cerrar sesión</button>'+
+      '</div>'+
+      '<div class="controls">'+
+        '<div class="field"><label for="a-date">Fecha</label><input type="date" id="a-date" value="'+state.adminDate+'"></div>'+
+        '<button class="btn ghost small" id="export-csv" style="margin-left:auto;">Exportar CSV</button>'+
+      '</div>'+
       '<div class="stat-row">'+
         '<div class="stat"><div class="val num">'+occupied+'</div><div class="lbl">Reservas del día</div></div>'+
         '<div class="stat"><div class="val num">'+pct+'%</div><div class="lbl">Ocupación (de '+TOTAL_SPOTS+' cocheras)</div></div>'+
@@ -416,16 +481,31 @@
         confirmReservation(name, email);
       });
     } else {
+      if (!state.session){
+        var loginForm = document.getElementById('login-form');
+        if (loginForm) loginForm.addEventListener('submit', function(ev){
+          ev.preventDefault();
+          var email = document.getElementById('a-email').value.trim();
+          var pass = document.getElementById('a-pass').value;
+          if (!email || !pass) return;
+          handleLogin(email, pass);
+        });
+        return;
+      }
       var adateEl = document.getElementById('a-date');
       if (adateEl) adateEl.addEventListener('change', function(){ state.adminDate = adateEl.value; fetchAdminDate(); });
       document.querySelectorAll('[data-cancel]').forEach(function(btn){ btn.addEventListener('click', function(){ cancelReservation(btn.dataset.cancel); }); });
+      var logoutBtn = document.getElementById('logout-btn');
+      if (logoutBtn) logoutBtn.addEventListener('click', handleLogout);
+      var exportBtn = document.getElementById('export-csv');
+      if (exportBtn) exportBtn.addEventListener('click', exportCSV);
     }
   }
 
   document.querySelectorAll('.tab').forEach(function(t){
     t.addEventListener('click', function(){
       state.view = t.dataset.view;
-      if (state.view === 'admin') fetchAdminDate();
+      if (state.view === 'admin' && state.session) fetchAdminDate();
       render();
     });
   });
