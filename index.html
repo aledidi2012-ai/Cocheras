@@ -110,6 +110,8 @@
 
   .banner{ background:rgba(245,180,0,0.08); border:1px solid rgba(245,180,0,0.3); color:var(--accent); border-radius:8px; padding:10px 14px; font-size:13px; margin-bottom:20px; }
   .banner.error{ background:rgba(214,88,76,0.1); border-color:rgba(214,88,76,0.4); color:var(--busy); }
+  .sec-input{ background:var(--raised); border:1px solid var(--border); color:var(--text); border-radius:6px; padding:7px 9px; font-size:13.5px; }
+  .sec-input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
   @media (prefers-reduced-motion: reduce){ *{ transition:none !important; } }
 </style>
 </head>
@@ -142,20 +144,16 @@
 (function(){
   "use strict";
 
-  var SECTIONS = [
-    { id:'A', name:'Sección A · Autos', type:'auto', rate:1500, count:10 },
-    { id:'B', name:'Sección B · Camionetas / SUV', type:'camioneta', rate:2000, count:6 },
-    { id:'C', name:'Sección C · Motos', type:'moto', rate:800, count:8 }
-  ];
-  function allSpots(){
+  function getSpots(){
     var out = [];
-    SECTIONS.forEach(function(s){
+    (state.sections||[]).forEach(function(s){
       for (var i=1;i<=s.count;i++) out.push({ id:s.id+i, section:s.id, sectionName:s.name, type:s.type, rate:s.rate, num:i });
     });
     return out;
   }
-  var SPOTS = allSpots();
-  var TOTAL_SPOTS = SPOTS.length;
+  function totalSpots(){
+    return (state.sections||[]).reduce(function(sum,s){ return sum + (s.count||0); }, 0);
+  }
 
   var state = {
     view: 'client', date: todayISO(), startTime: nextRoundHour(), duration: 1,
@@ -163,7 +161,8 @@
     step: 'browse', lastReservation: null, adminDate: todayISO(), adminReservations: [],
     configError: null, session: null, authChecked: false,
     isAdmin: null, loginError: null, loginBusy: false,
-    clientAuthMode: 'login', clientAuthError: null, clientAuthBusy: false
+    clientAuthMode: 'login', clientAuthError: null, clientAuthBusy: false,
+    sections: [], sectionsLoaded: false
   };
 
   var sb = null;
@@ -196,6 +195,7 @@
     }
     renderBanner();
     fetchClientDate();
+    fetchSections();
     subscribeRealtime();
 
     sb.auth.getSession().then(function(res){
@@ -281,6 +281,25 @@
     if (!res.error) { state.reservations = res.data || []; render(); }
   }
 
+  async function fetchSections(){
+    if (!sb) return;
+    var res = await sb.from('sections').select('*').order('sort_order', { ascending:true });
+    if (!res.error){ state.sections = res.data || []; state.sectionsLoaded = true; render(); }
+  }
+
+  async function updateSection(id, patch, btn){
+    if (!sb) return;
+    if (btn){ btn.disabled = true; btn.textContent = 'Guardando…'; }
+    var res = await sb.from('sections').update(patch).eq('id', id);
+    if (res.error){
+      alert('No se pudo guardar: ' + res.error.message);
+      if (btn){ btn.disabled = false; btn.textContent = 'Guardar'; }
+      return;
+    }
+    if (btn){ btn.disabled = false; btn.textContent = 'Guardado ✓'; setTimeout(function(){ btn.textContent = 'Guardar'; }, 1500); }
+    fetchSections();
+  }
+
   async function fetchAdminDate(){
     if (!sb) return;
     var res = await sb.from('reservations').select('*').eq('date', state.adminDate).order('start_time', { ascending:true });
@@ -290,10 +309,13 @@
   function subscribeRealtime(){
     if (!sb) return;
     if (realtimeChannel) sb.removeChannel(realtimeChannel);
-    realtimeChannel = sb.channel('reservations-live')
+    realtimeChannel = sb.channel('app-live')
       .on('postgres_changes', { event:'*', schema:'public', table:'reservations' }, function(){
         fetchClientDate();
         if (state.view === 'admin') fetchAdminDate();
+      })
+      .on('postgres_changes', { event:'*', schema:'public', table:'sections' }, function(){
+        fetchSections();
       })
       .subscribe();
   }
@@ -315,7 +337,7 @@
   function selectSpot(id){ state.selectedSpotId = id; state.step = 'browse'; render(); }
 
   async function confirmReservation(){
-    var spot = SPOTS.find(function(s){ return s.id === state.selectedSpotId; });
+    var spot = getSpots().find(function(s){ return s.id === state.selectedSpotId; });
     if (!spot || !sb || !state.session) return;
     var price = spot.rate * state.duration;
     var code = genCode();
@@ -359,8 +381,9 @@
 
   function clientHTML(){
     if (state.step === 'confirmed' && state.lastReservation) return clientHeaderHTML() + confirmedHTML();
-    var sectionsHTML = SECTIONS.map(function(sec){
-      var spots = SPOTS.filter(function(s){ return s.section === sec.id; });
+    if (!state.sectionsLoaded) return clientHeaderHTML() + '<p class="hint">Cargando cocheras…</p>';
+    var sectionsHTML = state.sections.map(function(sec){
+      var spots = getSpots().filter(function(s){ return s.section === sec.id; });
       var tiles = spots.map(function(s){
         var free = isSpotFree(s.id, state.date, state.startTime, state.duration);
         var sel = s.id === state.selectedSpotId;
@@ -410,7 +433,7 @@
   }
 
   function panelHTML(){
-    var spot = SPOTS.find(function(s){ return s.id === state.selectedSpotId; });
+    var spot = getSpots().find(function(s){ return s.id === state.selectedSpotId; });
     if (!spot) return '<h2>Elegí una cochera</h2><p class="hint">Tocá cualquier casillero libre del mapa para ver el precio y reservarla.</p>';
     var price = spot.rate * state.duration;
     var typeLabel = spot.type === 'auto' ? 'Auto' : (spot.type === 'camioneta' ? 'Camioneta / SUV' : 'Moto');
@@ -490,7 +513,7 @@
     var confirmadas = list.filter(function(r){ return r.status === 'confirmada'; });
     var occupied = confirmadas.length;
     var revenue = confirmadas.reduce(function(sum,r){ return sum + (Number(r.price)||0); }, 0);
-    var pct = TOTAL_SPOTS ? Math.round((occupied/TOTAL_SPOTS)*100) : 0;
+    var pct = totalSpots() ? Math.round((occupied/totalSpots())*100) : 0;
 
     var rows = confirmadas.map(function(r){
       var typeLabel = r.spot_type === 'auto' ? 'Auto' : (r.spot_type === 'camioneta' ? 'Camioneta' : 'Moto');
@@ -504,6 +527,18 @@
       '<div class="table-wrap"><table class="res"><thead><tr><th>Cochera</th><th>Tipo</th><th>Cliente</th><th>Horario</th><th>Total</th><th>Estado</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' :
       '<div class="empty"><div class="big">Sin reservas para esta fecha</div>Elegí otra fecha o esperá nuevas reservas.</div>';
 
+    var sectionRows = (state.sections||[]).map(function(s){
+      return '<tr>'+
+        '<td><input type="text" class="sec-input" data-field="name" data-id="'+s.id+'" value="'+escapeHtml(s.name)+'" style="width:200px;"></td>'+
+        '<td><input type="number" min="0" step="1" class="sec-input" data-field="rate" data-id="'+s.id+'" value="'+s.rate+'" style="width:100px;"></td>'+
+        '<td><input type="number" min="0" step="1" class="sec-input" data-field="count" data-id="'+s.id+'" value="'+s.count+'" style="width:80px;"></td>'+
+        '<td><button class="btn ghost small" data-save-section="'+s.id+'">Guardar</button></td>'+
+      '</tr>';
+    }).join('');
+    var sectionsAdminHTML = '<h2 class="page-title" style="font-size:19px;margin:32px 0 4px;">Tarifas y cocheras</h2>'+
+      '<p class="page-sub">Cambiá el nombre, la tarifa por hora o la cantidad de cocheras de cada sección. Se aplica al instante para todos.</p>'+
+      '<div class="table-wrap"><table class="res"><thead><tr><th>Sección</th><th>Tarifa / hora</th><th># Cocheras</th><th></th></tr></thead><tbody>'+sectionRows+'</tbody></table></div>';
+
     return '<div class="brand-row" style="margin-bottom:4px;">'+
         '<div><h1 class="page-title" style="margin-bottom:2px;">Panel del local</h1><p class="page-sub" style="margin-bottom:0;">Reservas por fecha, ocupación e ingresos estimados.</p></div>'+
         '<button class="btn ghost small" id="logout-btn">Cerrar sesión</button>'+
@@ -514,10 +549,10 @@
       '</div>'+
       '<div class="stat-row">'+
         '<div class="stat"><div class="val num">'+occupied+'</div><div class="lbl">Reservas del día</div></div>'+
-        '<div class="stat"><div class="val num">'+pct+'%</div><div class="lbl">Ocupación (de '+TOTAL_SPOTS+' cocheras)</div></div>'+
+        '<div class="stat"><div class="val num">'+pct+'%</div><div class="lbl">Ocupación (de '+totalSpots()+' cocheras)</div></div>'+
         '<div class="stat"><div class="val num">'+fmtMoney(revenue)+'</div><div class="lbl">Ingresos estimados</div></div>'+
-        '<div class="stat"><div class="val num">'+TOTAL_SPOTS+'</div><div class="lbl">Cocheras totales</div></div>'+
-      '</div>'+ tableOrEmpty;
+        '<div class="stat"><div class="val num">'+totalSpots()+'</div><div class="lbl">Cocheras totales</div></div>'+
+      '</div>'+ tableOrEmpty + sectionsAdminHTML;
   }
 
   function bindClientOrAdmin(){
@@ -591,6 +626,19 @@
       document.querySelectorAll('[data-cancel]').forEach(function(btn){ btn.addEventListener('click', function(){ cancelReservation(btn.dataset.cancel); }); });
       var exportBtn = document.getElementById('export-csv');
       if (exportBtn) exportBtn.addEventListener('click', exportCSV);
+      document.querySelectorAll('[data-save-section]').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var id = btn.dataset.saveSection;
+          var name = document.querySelector('.sec-input[data-field="name"][data-id="'+id+'"]').value.trim();
+          var rate = Number(document.querySelector('.sec-input[data-field="rate"][data-id="'+id+'"]').value);
+          var count = Number(document.querySelector('.sec-input[data-field="count"][data-id="'+id+'"]').value);
+          if (!name || isNaN(rate) || rate < 0 || isNaN(count) || count < 0){
+            alert('Revisá los valores: nombre requerido, tarifa y cantidad no pueden ser negativas.');
+            return;
+          }
+          updateSection(id, { name:name, rate:rate, count:Math.floor(count) }, btn);
+        });
+      });
     }
   }
 
