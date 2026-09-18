@@ -162,10 +162,12 @@
     configError: null, session: null, authChecked: false,
     isAdmin: null, loginError: null, loginBusy: false,
     clientAuthMode: 'login', clientAuthError: null, clientAuthBusy: false,
-    sections: [], sectionsLoaded: false
+    sections: [], sectionsLoaded: false,
+    newClientName: '', newClientBusy: false, newClientError: null, newClientSuccess: null
   };
 
   var sb = null;
+  var sbNoSession = null;
   var realtimeChannel = null;
 
   function todayISO(){ var d=new Date(); return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate()); }
@@ -248,6 +250,27 @@
       return;
     }
     // sesión creada automáticamente -> onAuthStateChange actualiza el resto
+  }
+
+  function getIsolatedAuthClient(){
+    // Cliente separado (no persiste sesión) para que crear una cuenta
+    // de cliente desde el panel no reemplace la sesión del admin logueado.
+    if (!sbNoSession){
+      sbNoSession = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, {
+        auth: { persistSession: false, autoRefreshToken: false, storageKey: 'sb-admin-alta-cliente' }
+      });
+    }
+    return sbNoSession;
+  }
+
+  async function handleAdminCreateClient(name, email, password){
+    state.newClientBusy = true; state.newClientError = null; state.newClientSuccess = null; render();
+    var client = getIsolatedAuthClient();
+    var res = await client.auth.signUp({ email: email, password: password, options: { data: { name: name } } });
+    state.newClientBusy = false;
+    if (res.error){ state.newClientError = 'No se pudo crear la cuenta: ' + res.error.message; render(); return; }
+    state.newClientSuccess = 'Cuenta creada para ' + email + '. Ya puede iniciar sesión con esa contraseña en "Reservar".';
+    render();
   }
 
   function exportCSV(){
@@ -539,6 +562,19 @@
       '<p class="page-sub">Cambiá el nombre, la tarifa por hora o la cantidad de cocheras de cada sección. Se aplica al instante para todos.</p>'+
       '<div class="table-wrap"><table class="res"><thead><tr><th>Sección</th><th>Tarifa / hora</th><th># Cocheras</th><th></th></tr></thead><tbody>'+sectionRows+'</tbody></table></div>';
 
+    var newClientHTML = '<h2 class="page-title" style="font-size:19px;margin:32px 0 4px;">Dar de alta un cliente</h2>'+
+      '<p class="page-sub">Para clientes que reservan por teléfono o en el mostrador: creá su cuenta vos y después pueden iniciar sesión con ese email y contraseña en "Reservar".</p>'+
+      '<div class="layout" style="grid-template-columns:1fr;max-width:420px;"><div class="panel">'+
+        (state.newClientSuccess ? '<div class="banner" style="margin-bottom:12px;">'+escapeHtml(state.newClientSuccess)+'</div>' : '')+
+        (state.newClientError ? '<div class="banner error" style="margin-bottom:12px;">'+escapeHtml(state.newClientError)+'</div>' : '')+
+        '<form id="new-client-form">'+
+          '<div class="field"><label for="nc-name">Nombre</label><input required id="nc-name" type="text" placeholder="Nombre y apellido"></div>'+
+          '<div class="field"><label for="nc-email">Email</label><input required id="nc-email" type="email" placeholder="cliente@email.com"></div>'+
+          '<div class="field"><label for="nc-pass">Contraseña</label><input required id="nc-pass" type="text" placeholder="Contraseña inicial" minlength="6"></div>'+
+          '<button type="submit" class="btn" '+(state.newClientBusy?'disabled':'')+'>'+(state.newClientBusy?'Creando cuenta…':'Crear cuenta')+'</button>'+
+        '</form>'+
+      '</div></div>';
+
     return '<div class="brand-row" style="margin-bottom:4px;">'+
         '<div><h1 class="page-title" style="margin-bottom:2px;">Panel del local</h1><p class="page-sub" style="margin-bottom:0;">Reservas por fecha, ocupación e ingresos estimados.</p></div>'+
         '<button class="btn ghost small" id="logout-btn">Cerrar sesión</button>'+
@@ -552,7 +588,7 @@
         '<div class="stat"><div class="val num">'+pct+'%</div><div class="lbl">Ocupación (de '+totalSpots()+' cocheras)</div></div>'+
         '<div class="stat"><div class="val num">'+fmtMoney(revenue)+'</div><div class="lbl">Ingresos estimados</div></div>'+
         '<div class="stat"><div class="val num">'+totalSpots()+'</div><div class="lbl">Cocheras totales</div></div>'+
-      '</div>'+ tableOrEmpty + sectionsAdminHTML;
+      '</div>'+ tableOrEmpty + sectionsAdminHTML + newClientHTML;
   }
 
   function bindClientOrAdmin(){
@@ -638,6 +674,15 @@
           }
           updateSection(id, { name:name, rate:rate, count:Math.floor(count) }, btn);
         });
+      });
+      var newClientForm = document.getElementById('new-client-form');
+      if (newClientForm) newClientForm.addEventListener('submit', function(ev){
+        ev.preventDefault();
+        var name = document.getElementById('nc-name').value.trim();
+        var email = document.getElementById('nc-email').value.trim();
+        var pass = document.getElementById('nc-pass').value;
+        if (!name || !email || !pass) return;
+        handleAdminCreateClient(name, email, pass);
       });
     }
   }
